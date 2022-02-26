@@ -1,13 +1,20 @@
 #include <TimerOne.h>
 #include <EncoderButton.h>
+#include <Button2.h>
+
 #include <U8g2lib.h>
 
 #pragma GCC diagnostic error "-Wall"
 
 #define STOP_BUTTON 41
+
 #define ENCODER_PUSH_BUTTON 35
 #define ENCODER_BUTTON1 31 
 #define ENCODER_BUTTON2 33
+
+#define MOTOR_Z_ENABLE 38
+#define MOTOR_Z_DIRECTION 55
+#define MOTOR_Z_STEP 54
 
 U8G2_ST7920_128X64_F_SW_SPI u8g(U8G2_R0, 23, 17, 16);
 
@@ -32,6 +39,7 @@ int last_menu_data_entry_button_state = HIGH;
 
 bool start_active = false;
 int last_start_button_state = HIGH;
+long start_time_usec = 0;
 
 EncoderButton encoder(ENCODER_BUTTON1, ENCODER_BUTTON2);
 
@@ -80,24 +88,11 @@ void setup() {
   pinMode(STOP_BUTTON, INPUT_PULLUP);
 
   pinMode(38, OUTPUT);
-  pinMode(56, OUTPUT);
-  pinMode(62, OUTPUT);
-  
   pinMode(55, OUTPUT);
-  pinMode(61, OUTPUT);
-  pinMode(48, OUTPUT);
-  
   pinMode(54, OUTPUT);
-  pinMode(60, OUTPUT);
-  pinMode(46, OUTPUT);
 
   digitalWrite(38, LOW);
-  digitalWrite(56, LOW);
-  digitalWrite(62, LOW);
-
-  digitalWrite(55, HIGH);
-  digitalWrite(61, HIGH);  
-  digitalWrite(48, HIGH);
+  digitalWrite(55, LOW);
 
   Timer1.initialize();
   Timer1.attachInterrupt(process, timer_period_usec);
@@ -117,9 +112,7 @@ volatile long steps_taken = 0;
 
 long elapsed_since_step_usec = 0;
 void process() {
-  if (!start_active) return;
-  
-  if (elapsed_since_step_usec > step_period_usec) {
+  if (start_active && elapsed_since_step_usec > step_period_usec) {
     if (steps_taken >= max_steps) return;
     
     elapsed_since_step_usec -= step_period_usec;
@@ -143,7 +136,7 @@ void loop() {
   const long now_usec = micros();
   encoder.update();
 
-  steps_per_second = microsteps * (10L + (now_usec / 10000L));
+  steps_per_second = microsteps * (10L + ((now_usec - start_time_usec) / 10000L));
   // steps_per_second = 5L;
   if (steps_per_second > steps_per_second_limit) {
     steps_per_second = steps_per_second_limit;
@@ -164,6 +157,14 @@ void loop() {
   if (stop_button != last_start_button_state) {
     if (stop_button == LOW) {
       start_active = !start_active;
+      if (start_active) {
+        start_time_usec = now_usec;
+        steps_taken = 0;
+        //last_step_usec = now_usec;
+        digitalWrite(MOTOR_Z_ENABLE, LOW);
+      } else {
+        digitalWrite(MOTOR_Z_ENABLE, HIGH);
+      }
     }
     last_start_button_state = stop_button;
     delay(100);
