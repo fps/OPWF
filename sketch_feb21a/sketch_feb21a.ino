@@ -1,7 +1,25 @@
 #include <TimerOne.h>
 #include <EncoderButton.h>
+#include <U8g2lib.h>
 
 #pragma GCC diagnostic error "-Wall"
+
+U8G2_ST7920_128X64_1_SW_SPI u8g(U8G2_R0, 23, 17, 16);
+
+struct menu_item {
+  const char* text;
+  float value;
+  float increment;
+};
+
+byte current_menu_entry_index = 0;
+const byte number_of_menu_entries = 4;
+menu_item menu[number_of_menu_entries] = {
+  { "Target Winds     ",    1000, 100   },
+  { "Current Winds    ",       0,   0   },
+  { "Winds per Second ",       0,   0.1 },
+  { "Acceleration     ",       1,   0.1 }
+};
 
 EncoderButton encoder(33, 31, 35);
 
@@ -11,24 +29,27 @@ const long steps_per_turn = 200L;
 const long microsteps = 16L;
 
 long rounds_per_second = 1L;
-long winds = 1000L;
+long target_winds = 1000L;
+long current_winds = 0L;
 long acceleration = 1L;
-
-void show_help() {
-  Serial.println("#########################################################################");
-  Serial.println("Commands:");
-    Serial.print("w [winds]                        - Set number of winds   ["); Serial.print(winds); Serial.println("]");
-    Serial.print("r [rounds per second]            - Set rounds per second ["); Serial.print(rounds_per_second); Serial.println("]");
-    Serial.print("a [rounds per second per second] - Set acceleration      ["); Serial.print(acceleration); Serial.println("]");
-  Serial.println("s                                - Start winding");
-  Serial.println("o                                - Stop winding");
-  Serial.println("?                                - show this help");
-}
 
 void setup() {
   Serial.begin(115200);
+  
+  u8g.begin();
 
-  show_help();
+  u8g.firstPage();
+  do {
+    byte y_position = 7;
+    const byte y_spacing = 8;
+    u8g.setFont(u8g2_font_5x7_mr);
+    u8g.setDrawColor(2);
+    for (byte menu_entry_index = 0; menu_entry_index < number_of_menu_entries; ++menu_entry_index) {  
+      u8g.setCursor(0, y_position);
+      u8g.print(menu[menu_entry_index].text); u8g.print(menu[menu_entry_index].value);    
+      y_position += y_spacing;      
+    }
+  } while ( u8g.nextPage() );
 
   // Beeper
   pinMode(37, OUTPUT);
@@ -102,6 +123,7 @@ void handle_serial_input() {
 }
 
 void loop() {
+
   handle_serial_input();
   
   const long now_usec = micros();
