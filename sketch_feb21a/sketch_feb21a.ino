@@ -16,6 +16,9 @@
 #define MOTOR_Z_DIRECTION 55
 #define MOTOR_Z_STEP 54
 
+Button2 encoder_push_button;
+Button2 stop_button;
+
 U8G2_ST7920_128X64_F_SW_SPI u8g(U8G2_R0, 23, 17, 16);
 
 struct menu_item {
@@ -29,16 +32,15 @@ bool menu_needs_redraw = false;
 const byte number_of_menu_entries = 4;
 menu_item menu[number_of_menu_entries] = {
   { "Target Winds  ",    1000, 100   },
-  { "Current Winds ",       0,   0   },
+  { "Current Winds ",       0, 100   },
   { "Speed W/s     ",       1,   0.1 },
   { "Accel. W/s^2  ",     0.1,   0.1 }
 };
 
 bool menu_data_entry_active = false;
-int last_menu_data_entry_button_state = HIGH;
 
-bool start_active = false;
-int last_start_button_state = HIGH;
+volatile bool start_active = false;
+
 long start_time_usec = 0;
 
 EncoderButton encoder(ENCODER_BUTTON1, ENCODER_BUTTON2);
@@ -61,11 +63,16 @@ void draw_menu() {
     u8g.setFont(u8g2_font_5x7_mr);
     for (byte menu_entry_index = 0; menu_entry_index < number_of_menu_entries; ++menu_entry_index) {  
       u8g.setDrawColor(2);
-      if (menu_entry_index == current_menu_entry_index) {
+      if (menu_entry_index == current_menu_entry_index && !menu_data_entry_active) {
         u8g.setDrawColor(0);    
       }
       u8g.setCursor(0, y_position);
-      u8g.print(menu[menu_entry_index].text); u8g.print(menu[menu_entry_index].value);    
+      u8g.print(menu[menu_entry_index].text); 
+      
+      if (menu_entry_index == current_menu_entry_index && menu_data_entry_active) {
+        u8g.setDrawColor(0);    
+      }
+      u8g.print(menu[menu_entry_index].value);    
       y_position += y_spacing;      
     }
   } while ( u8g.nextPage() );  
@@ -73,6 +80,11 @@ void draw_menu() {
 
 void setup() {
   Serial.begin(115200);
+
+  stop_button.begin(STOP_BUTTON);
+  stop_button.setClickHandler(button_handler);
+  encoder_push_button.begin(ENCODER_PUSH_BUTTON);
+  encoder_push_button.setClickHandler(button_handler);
   
   u8g.begin();
   draw_menu();
@@ -87,21 +99,21 @@ void setup() {
 
   pinMode(STOP_BUTTON, INPUT_PULLUP);
 
-  pinMode(38, OUTPUT);
-  pinMode(55, OUTPUT);
-  pinMode(54, OUTPUT);
+  pinMode(MOTOR_Z_ENABLE, OUTPUT);
+  pinMode(MOTOR_Z_DIRECTION, OUTPUT);
+  pinMode(MOTOR_Z_STEP, OUTPUT);
 
-  digitalWrite(38, LOW);
-  digitalWrite(55, LOW);
+  digitalWrite(MOTOR_Z_ENABLE, HIGH);
+  digitalWrite(MOTOR_Z_DIRECTION, HIGH);
 
   Timer1.initialize();
   Timer1.attachInterrupt(process, timer_period_usec);
 }
   
-long step_period_usec = 1e6L;
+volatile long step_period_usec = 1e6L;
 
-long steps_per_second;
-long elapsed_usec = 0;
+unsigned long steps_per_second;
+unsigned long elapsed_usec = 0;
 long elapsed_control_periods = 0;
 
 const long steps_per_second_limit = 2L * steps_per_turn * microsteps;
@@ -113,28 +125,52 @@ volatile long steps_taken = 0;
 long elapsed_since_step_usec = 0;
 void process() {
   if (start_active && elapsed_since_step_usec > step_period_usec) {
-    if (steps_taken >= max_steps) return;
-    
-    elapsed_since_step_usec -= step_period_usec;
-
-    PORTF |= B00000001;
-    PORTF &= B11111110;
+    if (steps_taken < max_steps) {    
+      elapsed_since_step_usec -= step_period_usec;
   
-    ++steps_taken;
+      PORTF |= B00000001;
+      PORTF &= B11111110;
+    
+      ++steps_taken;
+    }
   }
 
   elapsed_since_step_usec += timer_period_usec;
 }
 
 long last_output_usec = 0;
-const long output_period_usec = 1e5L;
+const long output_period_usec = 5e5L;
 
 int last_encoder_position = 0;
 long last_encoder_change_usec = 0;
 
+volatile unsigned long now_usec = 0;
+
+void button_handler(Button2 &button) {
+  if (button == stop_button) {
+      start_time_usec = now_usec;
+      step_period_usec = 1e6L;
+      elapsed_since_step_usec = 0;
+      //last_step_usec = now_usec;
+      if (!start_active) {
+        digitalWrite(MOTOR_Z_ENABLE, LOW);
+      } else {
+        digitalWrite(MOTOR_Z_ENABLE, HIGH);
+      }
+      start_active = !start_active;      
+  }
+
+  if (button == encoder_push_button) {
+    menu_data_entry_active = !menu_data_entry_active;
+    draw_menu();
+  }
+}
+
 void loop() {
-  const long now_usec = micros();
+  now_usec = micros();
   encoder.update();
+  stop_button.loop();
+  encoder_push_button.loop();
 
   steps_per_second = microsteps * (10L + ((now_usec - start_time_usec) / 10000L));
   // steps_per_second = 5L;
@@ -143,32 +179,6 @@ void loop() {
   }
   
   step_period_usec = 1e6L / steps_per_second;  
-
-  int push_button = digitalRead(ENCODER_PUSH_BUTTON);
-  if (push_button != last_menu_data_entry_button_state) {
-    if (push_button == LOW) {
-      menu_data_entry_active = !menu_data_entry_active;
-    }
-    last_menu_data_entry_button_state = push_button;
-    delay(100);
-  }
-
-  int stop_button = digitalRead(STOP_BUTTON);   
-  if (stop_button != last_start_button_state) {
-    if (stop_button == LOW) {
-      start_active = !start_active;
-      if (start_active) {
-        start_time_usec = now_usec;
-        steps_taken = 0;
-        //last_step_usec = now_usec;
-        digitalWrite(MOTOR_Z_ENABLE, LOW);
-      } else {
-        digitalWrite(MOTOR_Z_ENABLE, HIGH);
-      }
-    }
-    last_start_button_state = stop_button;
-    delay(100);
-  }
 
   const int encoder_position = encoder.position();
   if (encoder_position != last_encoder_position) {
