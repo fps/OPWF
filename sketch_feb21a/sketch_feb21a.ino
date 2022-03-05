@@ -83,6 +83,7 @@ void setup() {
 
   stop_button.begin(STOP_BUTTON);
   stop_button.setClickHandler(button_handler);
+  stop_button.setDoubleClickHandler(button_handler);
   encoder_push_button.begin(ENCODER_PUSH_BUTTON);
   encoder_push_button.setClickHandler(button_handler);
   
@@ -114,11 +115,10 @@ volatile long step_period_usec = 1e6L;
 
 unsigned long steps_per_second;
 unsigned long elapsed_usec = 0;
-long elapsed_control_periods = 0;
 
-const long steps_per_second_limit = 2L * steps_per_turn * microsteps;
+long steps_per_second_limit = 1L;
 
-const long max_steps = 100L * steps_per_turn * microsteps;
+volatile long max_steps = 1L;
 
 volatile long steps_taken = 0;
 
@@ -138,26 +138,44 @@ void process() {
   elapsed_since_step_usec += timer_period_usec;
 }
 
-long last_output_usec = 0;
-const long output_period_usec = 5e5L;
+unsigned long last_output_usec = 0;
+const unsigned long output_period_usec = 5e5L;
 
 int last_encoder_position = 0;
-long last_encoder_change_usec = 0;
+unsigned long last_encoder_change_usec = 0;
 
 volatile unsigned long now_usec = 0;
 
 void button_handler(Button2 &button) {
   if (button == stop_button) {
-      start_time_usec = now_usec;
-      step_period_usec = 1e6L;
-      elapsed_since_step_usec = 0;
-      //last_step_usec = now_usec;
-      if (!start_active) {
-        digitalWrite(MOTOR_Z_ENABLE, LOW);
-      } else {
-        digitalWrite(MOTOR_Z_ENABLE, HIGH);
+      if (button.getClickType() == SINGLE_CLICK) {
+        start_time_usec = now_usec;
+        steps_per_second_limit = menu[2].value * steps_per_turn * microsteps;
+        max_steps = menu[0].value * steps_per_turn * microsteps;
+        step_period_usec = 1e6L;
+        elapsed_since_step_usec = 0;
+
+        Serial.print("limit: "); Serial.println(steps_per_second_limit); 
+        
+        if (!start_active) {
+          digitalWrite(MOTOR_Z_ENABLE, LOW);
+        } else {
+          digitalWrite(MOTOR_Z_ENABLE, HIGH);
+        }
+        
+        start_active = !start_active;
+
+        if (!start_active) {
+          menu[1].value = (float)steps_taken / (steps_per_turn * microsteps);
+          draw_menu();
+        }
       }
-      start_active = !start_active;      
+
+      if (button.getClickType() == DOUBLE_CLICK) {
+        menu[1].value = 0;
+        steps_taken = 0;
+        draw_menu();
+      }
   }
 
   if (button == encoder_push_button) {
@@ -172,14 +190,16 @@ void loop() {
   stop_button.loop();
   encoder_push_button.loop();
 
-  steps_per_second = microsteps * (10L + ((now_usec - start_time_usec) / 10000L));
-  // steps_per_second = 5L;
-  if (steps_per_second > steps_per_second_limit) {
-    steps_per_second = steps_per_second_limit;
+  if (start_active) {
+    steps_per_second = microsteps * (10L + ((now_usec - start_time_usec) / 10000L));
+    // steps_per_second = 5L;
+    if (steps_per_second > steps_per_second_limit) {
+      steps_per_second = steps_per_second_limit;
+    }
+    
+    step_period_usec = 1e6L / steps_per_second;  
   }
   
-  step_period_usec = 1e6L / steps_per_second;  
-
   const int encoder_position = encoder.position();
   if (encoder_position != last_encoder_position) {
     if (menu_data_entry_active) {
@@ -201,16 +221,24 @@ void loop() {
     menu_needs_redraw = false;
   }
     
-  if (now_usec - last_output_usec > output_period_usec) {
+  if (true && now_usec - last_output_usec > output_period_usec) {
     last_output_usec = now_usec;
 
+    Serial.print(" enc pos: ");
     Serial.print(encoder.position());
-    Serial.print(" ");
+    Serial.print(" enc push: ");
     Serial.print(digitalRead(ENCODER_PUSH_BUTTON));
-    Serial.print(" ");
+    Serial.print(" stop: ");
     Serial.print(digitalRead(STOP_BUTTON));
-    Serial.print(" ");
-    Serial.println(steps_taken / (steps_per_turn * microsteps));
+    Serial.print(" winds: ");
+    Serial.print((float)steps_taken / (steps_per_turn * microsteps));
+    Serial.print(" steps: ");
+    Serial.print(steps_taken);
+    Serial.print(" sps: ");
+    Serial.print(steps_per_second);
+    Serial.print(" step period: ");
+    Serial.print(step_period_usec);
+    Serial.println("");
   }  
 
   return;
