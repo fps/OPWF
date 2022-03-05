@@ -31,7 +31,7 @@ int current_menu_entry_index = 0;
 bool menu_needs_redraw = false;
 const byte number_of_menu_entries = 4;
 menu_item menu[number_of_menu_entries] = {
-  { "Target Winds  ",    1000, 100   },
+  { "Target Winds  ",    1000,  50   },
   { "Current Winds ",       0, 100   },
   { "Speed W/s     ",       1,   0.1 },
   { "Accel. W/s^2  ",     0.1,   0.1 }
@@ -191,7 +191,12 @@ void loop() {
   encoder_push_button.loop();
 
   if (start_active) {
-    steps_per_second = microsteps * (10L + ((now_usec - start_time_usec) / 10000L));
+    const float seconds_since_start = (now_usec - start_time_usec) / 1e6f;
+    float winds_per_second = menu[3].value * seconds_since_start;
+    if (winds_per_second > menu[2].value) winds_per_second = menu[2].value;
+    
+    // steps_per_second = microsteps * (10L + ((now_usec - start_time_usec) / 10000L));
+    steps_per_second = 10L + winds_per_second * microsteps * steps_per_turn;
     // steps_per_second = 5L;
     if (steps_per_second > steps_per_second_limit) {
       steps_per_second = steps_per_second_limit;
@@ -221,7 +226,7 @@ void loop() {
     menu_needs_redraw = false;
   }
     
-  if (true && now_usec - last_output_usec > output_period_usec) {
+  if (false && now_usec - last_output_usec > output_period_usec) {
     last_output_usec = now_usec;
 
     Serial.print(" enc pos: ");
