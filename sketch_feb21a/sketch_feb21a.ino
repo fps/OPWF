@@ -102,6 +102,8 @@ const float magic_cookie = 31.337f;
 void read_eeprom() {
   Serial.println("Restoring from EEPROM...");
   for (unsigned index = 0; index < number_of_menu_entries; ++index) {
+    // skip current winds
+    if (index == 1) continue;
     EEPROM.get((index+1)*sizeof(float), menu[index].value);
   }
   Serial.println("Done.");
@@ -110,8 +112,15 @@ void read_eeprom() {
 void save_eeprom() {
   Serial.println("Saving to EEPROM");
   EEPROM.put(0, magic_cookie);
+  float eeprom_value;
   for (unsigned index = 0; index < number_of_menu_entries; ++index) {
-    EEPROM.put((index+1)*sizeof(float), menu[index].value);
+    // skip current winds
+    if (index == 1) continue; 
+    EEPROM.get((index+1)*sizeof(float), eeprom_value);
+    if (eeprom_value != menu[index].value) {
+      Serial.println(menu[index].value);
+      EEPROM.put((index+1)*sizeof(float), menu[index].value);      
+    }
   }
   Serial.println("Done.");
 }
@@ -206,6 +215,7 @@ volatile unsigned long now_usec = 0;
 void button_handler(Button2 &button) {
   if (button == stop_button) {
       if (button.getClickType() == SINGLE_CLICK) {
+        save_eeprom();
         start_time_usec = now_usec;
         steps_per_second_limit = menu[2].value * steps_per_turn * microsteps;
         max_steps = menu[0].value * steps_per_turn * microsteps;
