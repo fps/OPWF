@@ -1,6 +1,10 @@
-#include <TimerOne.h>
+
+// #include <TimerOne.h>
+#include <FrequencyTimer2.h>
 #include <EncoderButton.h>
 #include <Button2.h>
+#include <Servo.h>
+#include <EEPROM.h>
 
 #include <U8g2lib.h>
 
@@ -16,10 +20,22 @@
 #define MOTOR_Z_DIRECTION 55
 #define MOTOR_Z_STEP 54
 
+#define SERVO_PIN 11
+
+Servo servo;
+
 Button2 encoder_push_button;
 Button2 stop_button;
 
 U8G2_ST7920_128X64_F_SW_SPI u8g(U8G2_R0, 23, 17, 16);
+// U8G2_ST7920_128X64_1_SW_SPI u8g(U8G2_R0, 23, 17, 16);
+
+enum states {
+  STOPPED = 0,
+  STARTING,
+  STARTED,
+  STOPPING
+};
 
 struct menu_item {
   const char* text;
@@ -29,12 +45,15 @@ struct menu_item {
 
 int current_menu_entry_index = 0;
 bool menu_needs_redraw = false;
-const byte number_of_menu_entries = 4;
+const byte number_of_menu_entries = 7;
 menu_item menu[number_of_menu_entries] = {
-  { "Target Winds  ",    1000,  50   },
-  { "Current Winds ",       0, 100   },
-  { "Speed W/s     ",       1,   0.1 },
-  { "Accel. W/s^2  ",     0.1,   0.1 }
+  { "Target Winds     ",    1000,  50   },
+  { "Current Winds    ",       0, 100   },
+  { "Speed W/s        ",       2,   0.1 },
+  { "Accel. W/s^2     ",     1.0,   0.1 },
+  { "Winds/Sweep      ",      10,   1   },
+  { "Left limit deg.  ",       0,   1   },
+  { "Right Limit deg. ",     180,   1   }
 };
 
 bool menu_data_entry_active = false;
@@ -45,7 +64,7 @@ long start_time_usec = 0;
 
 EncoderButton encoder(ENCODER_BUTTON1, ENCODER_BUTTON2);
 
-const long timer_period_usec = 10L;
+const long timer_period_usec = 100L;
 
 const long steps_per_turn = 200L;
 const long microsteps = 16L;
@@ -78,8 +97,35 @@ void draw_menu() {
   } while ( u8g.nextPage() );  
 }
 
+const float magic_cookie = 31.337f;
+
+void read_eeprom() {
+  Serial.println("Restoring from EEPROM...");
+  for (unsigned index = 0; index < number_of_menu_entries; ++index) {
+    EEPROM.get((index+1)*sizeof(float), menu[index].value);
+  }
+  Serial.println("Done.");
+}
+
+void save_eeprom() {
+  Serial.println("Saving to EEPROM");
+  EEPROM.put(0, magic_cookie);
+  for (unsigned index = 0; index < number_of_menu_entries; ++index) {
+    EEPROM.put((index+1)*sizeof(float), menu[index].value);
+  }
+  Serial.println("Done.");
+}
+
 void setup() {
   Serial.begin(115200);
+  while (!Serial) {}
+
+  float eeprom_value;
+  if (EEPROM.get(0, eeprom_value) == magic_cookie) {
+    read_eeprom();
+  } else {
+    save_eeprom(); 
+  }
 
   stop_button.begin(STOP_BUTTON);
   stop_button.setClickHandler(button_handler);
@@ -89,6 +135,12 @@ void setup() {
   
   u8g.begin();
   draw_menu();
+
+  // Servo
+  servo.attach(SERVO_PIN);
+  servo.write(menu[5].value);
+  // pinMode(SERVO_PIN, OUTPUT);
+  // analogWrite(SERVO_PIN, 128);
 
   // Beeper
   pinMode(37, OUTPUT);
@@ -106,9 +158,13 @@ void setup() {
 
   digitalWrite(MOTOR_Z_ENABLE, HIGH);
   digitalWrite(MOTOR_Z_DIRECTION, HIGH);
-
+  /*
   Timer1.initialize();
   Timer1.attachInterrupt(process, timer_period_usec);
+  */
+
+  FrequencyTimer2::setPeriod(timer_period_usec);
+  FrequencyTimer2::setOnOverflow(process);
 }
   
 volatile long step_period_usec = 1e6L;
@@ -120,9 +176,10 @@ long steps_per_second_limit = 1L;
 
 volatile long max_steps = 1L;
 
-volatile long steps_taken = 0;
+volatile long steps_taken = 0L;
 
-long elapsed_since_step_usec = 0;
+long elapsed_since_step_usec = 0L;
+
 void process() {
   if (start_active && elapsed_since_step_usec > step_period_usec) {
     if (steps_taken < max_steps) {    
@@ -202,7 +259,18 @@ void loop() {
       steps_per_second = steps_per_second_limit;
     }
     
-    step_period_usec = 1e6L / steps_per_second;  
+    step_period_usec = 1e6L / steps_per_second;
+
+    const float current_wind = (float)steps_taken / (float)(steps_per_turn * microsteps);
+    const float sweep_phase = fmodf(current_wind / menu[4].value, 1.0);
+    // Serial.println(sweep_phase);
+    if (sweep_phase < 0.5f) {
+      const float half_phase = 2.0f * sweep_phase;
+      servo.write((menu[6].value - menu[5].value) * half_phase + menu[5].value);
+    } else {
+      const float half_phase = 2.0f * (sweep_phase - 0.5f);
+      servo.write((menu[5].value - menu[6].value) * half_phase + menu[6].value);
+    }
   }
   
   const int encoder_position = encoder.position();
