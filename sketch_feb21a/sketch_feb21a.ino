@@ -1,14 +1,12 @@
-
 // #include <TimerOne.h>
-#include <FrequencyTimer2.h>
+// #include <FrequencyTimer2.h>
 #include <EncoderButton.h>
 #include <Button2.h>
 #include <Servo.h>
 #include <EEPROM.h>
-
 #include <U8g2lib.h>
 
-#pragma GCC diagnostic error "-Wall"
+// #################### CONSTANTS
 
 #define STOP_BUTTON 41
 
@@ -22,13 +20,20 @@
 
 #define SERVO_PIN 11
 
+const long timer_period_usec = 10L;
+const long steps_per_turn = 200L;
+const long microsteps = 16L;
+
+
+// #################### SERVO
+
 Servo servo;
+
+
+// #################### BUTTONS
 
 Button2 encoder_push_button;
 Button2 stop_button;
-
-U8G2_ST7920_128X64_F_SW_SPI u8g(U8G2_R0, 23, 17, 16);
-// U8G2_ST7920_128X64_1_SW_SPI u8g(U8G2_R0, 23, 17, 16);
 
 enum states {
   STOPPED = 0,
@@ -36,6 +41,12 @@ enum states {
   STARTED,
   STOPPING
 };
+
+
+// #################### MENU
+
+U8G2_ST7920_128X64_F_SW_SPI u8g(U8G2_R0, 23, 17, 16);
+// U8G2_ST7920_128X64_1_SW_SPI u8g(U8G2_R0, 23, 17, 16);
 
 struct menu_item {
   const char* text;
@@ -48,12 +59,12 @@ bool menu_needs_redraw = false;
 const byte number_of_menu_entries = 7;
 menu_item menu[number_of_menu_entries] = {
   { "Target Winds     ",    1000,  50   },
-  { "Current Winds    ",       0, 100   },
+  { "Current Winds    ",       0,   0   },
   { "Speed W/s        ",       2,   0.1 },
   { "Accel. W/s^2     ",     1.0,   0.1 },
   { "Winds/Sweep      ",      10,   1   },
-  { "Left limit deg.  ",       0,   1   },
-  { "Right Limit deg. ",     180,   1   }
+  { "Right limit deg. ",       0,   1   },
+  { "Left Limit deg.  ",     180,   1   }
 };
 
 bool menu_data_entry_active = false;
@@ -63,16 +74,6 @@ volatile bool start_active = false;
 long start_time_usec = 0;
 
 EncoderButton encoder(ENCODER_BUTTON1, ENCODER_BUTTON2);
-
-const long timer_period_usec = 100L;
-
-const long steps_per_turn = 200L;
-const long microsteps = 16L;
-
-long rounds_per_second = 1L;
-long target_winds = 1000L;
-long current_winds = 0L;
-long acceleration = 1L;
 
 void draw_menu() {
   u8g.firstPage();
@@ -91,11 +92,16 @@ void draw_menu() {
       if (menu_entry_index == current_menu_entry_index && menu_data_entry_active) {
         u8g.setDrawColor(0);    
       }
-      u8g.print(menu[menu_entry_index].value);    
+      char buffer[10];
+      dtostrf(menu[menu_entry_index].value, 8, 2, buffer);
+      u8g.print(buffer);    
       y_position += y_spacing;      
     }
   } while ( u8g.nextPage() );  
 }
+
+
+// #################### EEPROM
 
 const float magic_cookie = 31.337f;
 
@@ -124,6 +130,9 @@ void save_eeprom() {
   }
   Serial.println("Done.");
 }
+
+
+// #################### SETUP
 
 void setup() {
   Serial.begin(115200);
@@ -172,12 +181,29 @@ void setup() {
   Timer1.attachInterrupt(process, timer_period_usec);
   */
 
+  /* 
   FrequencyTimer2::setPeriod(timer_period_usec);
   FrequencyTimer2::setOnOverflow(process);
+  */
+  //set timer2 interrupt at 8kHz
+  TCCR2A = 0;// set entire TCCR2A register to 0
+  TCCR2B = 0;// same for TCCR2B
+  TCNT2  = 0;//initialize counter value to 0
+  // set compare match register for 8khz increments
+  // OCR2A = 249;// = (16*10^6) / (8000*8) - 1 (must be <256)
+  OCR2A = 19;
+  // turn on CTC mode
+  TCCR2A |= (1 << WGM21);
+  // Set CS21 bit for 8 prescaler
+  TCCR2B |= (1 << CS21);   
+  // enable timer compare interrupt
+  TIMSK2 |= (1 << OCIE2A);
 }
-  
-volatile long step_period_usec = 1e6L;
 
+
+// #################### GLOBAL STATE
+
+unsigned long step_period_usec = 0;
 unsigned long steps_per_second;
 unsigned long elapsed_usec = 0;
 
@@ -189,7 +215,12 @@ volatile long steps_taken = 0L;
 
 long elapsed_since_step_usec = 0L;
 
-void process() {
+
+// #################### INTERRUPTS
+
+// void process() {
+ISR(TIMER2_COMPA_vect) {
+  cli();
   if (start_active && elapsed_since_step_usec > step_period_usec) {
     if (steps_taken < max_steps) {    
       elapsed_since_step_usec -= step_period_usec;
@@ -202,7 +233,10 @@ void process() {
   }
 
   elapsed_since_step_usec += timer_period_usec;
+  sei();
 }
+
+// #################### BUTTON HANDLING
 
 unsigned long last_output_usec = 0;
 const unsigned long output_period_usec = 5e5L;
@@ -250,6 +284,9 @@ void button_handler(Button2 &button) {
     draw_menu();
   }
 }
+
+
+// #################### MAIN LOOP
 
 void loop() {
   now_usec = micros();
@@ -304,7 +341,7 @@ void loop() {
     menu_needs_redraw = false;
   }
     
-  if (false && now_usec - last_output_usec > output_period_usec) {
+  if (true && now_usec - last_output_usec > output_period_usec) {
     last_output_usec = now_usec;
 
     Serial.print(" enc pos: ");
