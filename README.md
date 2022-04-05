@@ -20,8 +20,12 @@ This repository contains firmware for a pickup winder based on a Ramps 1.4 board
 - Do not use the encoder during the winding process. The stepper control should be robust, but the servo control is not. Everytime you move the encoder you will experience the servo jerking. This will take a little effort to do correcty.
 - The "Current Winds" counter is only updated when the winding is stopped. Otherwise the display updates would interfere with the servo controll as well.
 
+# LICENSE
+
+- To be figured out
+
 # Author
 
-Florian Paul Schmidt
-Florian Hofmann  
+- Florian Paul Schmidt
+- Florian Hofmann  
 
