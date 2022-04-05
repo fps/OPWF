@@ -50,7 +50,7 @@ Servo servo;
 Button2 encoder_push_button;
 Button2 stop_button;
 
-enum {
+volatile enum {
   STOPPED = 0,
   STARTING,
   RUNNING,
@@ -86,12 +86,12 @@ int current_menu_entry_index = 0;
 bool menu_needs_redraw = false;
 
 menu_item menu[NUMBER_OF_MENU_ENTRIES] = {
-  { "Target Winds     ",    1000,  50,     1, 20000 },
+  { "Target Winds     ",    1000,  50,     0, 20000 },
   { "Current Winds    ",       0,   0,     0, 20000 },
   { "Wind Direction   ",       1,   2,    -1,     1 },
   { "Speed W/s        ",       2,   0.1, 0.1,    10 },
   { "Accel. W/s^2     ",     1.0,   0.1, 0.1,    10 },
-  { "Winds/Sweep      ",     100,   1,     0,  1000 },
+  { "Winds/Sweep      ",     100,  10,     0,  5000 },
   { "Right limit deg. ",      90,   1,     0,   180 },
   { "Left Limit deg.  ",     120,   1,     0,   180 }
 };
@@ -211,6 +211,9 @@ void setup() {
 
   // Beeper
 
+  Serial.println("Setting up state...");
+  state = STOPPED;
+  
   Serial.println("Setting up timers...");
   /*
   Timer1.initialize();
@@ -246,7 +249,7 @@ void setup() {
 // void process() {
 ISR(TIMER2_COMPA_vect) {
   cli();
-  if (start_active) {
+  if (state != STOPPED) {
     if (steps_taken < max_steps) {
       if (elapsed_since_step_usec > step_period_usec) {
         elapsed_since_step_usec -= step_period_usec;
@@ -257,7 +260,7 @@ ISR(TIMER2_COMPA_vect) {
         ++steps_taken;
       }
     } else {
-      start_active = false;
+      state = STOPPING;
     }
   }
   elapsed_since_step_usec += timer_period_usec;
@@ -285,19 +288,25 @@ void button_handler(Button2 &button) {
         elapsed_since_step_usec = 0;
 
         Serial.print("limit: "); Serial.println(steps_per_second_limit); 
-        
-        if (!start_active) {
+
+        if (state == STOPPED) {
+          Serial.println("STOPPED -> STARTING...");
           digitalWrite(MOTOR_Z_ENABLE, LOW);
           if (menu[WIND_DIRECTION].value > 0) digitalWrite(MOTOR_Z_DIRECTION, HIGH); else digitalWrite(MOTOR_Z_DIRECTION, LOW);
-        } else {
-          digitalWrite(MOTOR_Z_ENABLE, HIGH);
+          state = STARTING;
+          return;
         }
-        
-        start_active = !start_active;
 
-        if (!start_active) {
-          menu[CURRENT_WINDS].value = (float)steps_taken / (steps_per_turn * microsteps);
-          draw_menu();
+        if (state == RUNNING) {
+          Serial.println("RUNNING -> STOPPING...");
+          state = STOPPING;
+          return;
+        }
+
+        if (state == STARTING) {
+          Serial.println("STARTING -> STOPPING...");
+          state = STOPPING;
+          return;
         }
       }
 
@@ -305,6 +314,7 @@ void button_handler(Button2 &button) {
         menu[CURRENT_WINDS].value = 0;
         steps_taken = 0;
         draw_menu();
+        return;
       }
   }
 
@@ -322,11 +332,19 @@ void loop() {
   encoder.update();
   stop_button.loop();
   encoder_push_button.loop();
-
   
   // STEPPER CONTROL
+
+  if (state == STOPPING) {
+      Serial.println("STOPPING -> STOPPED...");
+      digitalWrite(MOTOR_Z_ENABLE, HIGH);
+      state = STOPPED;
+      menu[CURRENT_WINDS].value = (float)steps_taken / (steps_per_turn * microsteps);
+      draw_menu();
+      Serial.println("Done.");
+  }
   
-  if (state == RUNNING) {
+  if (state == STARTING) {
     const float seconds_since_start = (now_usec - start_time_usec) / 1e6f;
     float winds_per_second = menu[ACCELERATION].value * seconds_since_start;
     if (winds_per_second > menu[SPEED].value) winds_per_second = menu[SPEED].value;
@@ -336,8 +354,12 @@ void loop() {
     // steps_per_second = 5L;
     if (steps_per_second > steps_per_second_limit) {
       steps_per_second = steps_per_second_limit;
+      Serial.println("STARTING -> RUNNING");
+      state = RUNNING;
     }
-    
+  }
+
+  if (state != STOPPED) {
     step_period_usec = 1e6L / steps_per_second;
 
     const float current_wind = (float)steps_taken / (float)(steps_per_turn * microsteps);
