@@ -13,6 +13,12 @@ This repository contains firmware for a pickup winder based on a Ramps 1.4 board
 - Rotate the encoder to change a setting. Since the display is so godawfully slow the code waits for a timeout until updating the display.
 - Press the STOP button on the display to start the winding process
 - Press the STOP button to stop the winding process, too ;)
+- Press the STOP button twice (doubleclick) to reset the "Current Winds" counter to 0
+
+# CAVEATS
+
+- Do not use the encoder during the winding process. The stepper control should be robust, but the servo control is not. Everytime you move the encoder you will experience the servo jerking. This will take a little effort to do correcty.
+- The "Current Winds" counter is only updated when the winding is stopped. Otherwise the display updates would interfere with the servo controll as well.
 
 # Author
 
