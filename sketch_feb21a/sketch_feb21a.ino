@@ -1,6 +1,6 @@
-// #include <TimerOne.h>
-// #include <FrequencyTimer2.h>
+#define ENCODER_USE_INTERRUPTS
 #include <EncoderButton.h>
+
 #include <Button2.h>
 #include <Servo.h>
 #include <EEPROM.h>
@@ -20,9 +20,24 @@
 
 #define SERVO_PIN 11
 
-const long timer_period_usec = 10L;
+const long timer_period_usec = 20L;
 const long steps_per_turn = 200L;
 const long microsteps = 16L;
+
+
+// #################### GLOBAL STATE
+
+long step_period_usec = 0;
+unsigned long steps_per_second;
+long elapsed_since_step_usec = 0L;
+
+
+unsigned long steps_per_second_limit = 1L;
+volatile long max_steps = 1L;
+volatile long steps_taken = 0L;
+
+volatile bool start_active = false;
+long start_time_usec = 0;
 
 
 // #################### SERVO
@@ -46,32 +61,42 @@ enum states {
 // #################### MENU
 
 U8G2_ST7920_128X64_F_SW_SPI u8g(U8G2_R0, 23, 17, 16);
-// U8G2_ST7920_128X64_1_SW_SPI u8g(U8G2_R0, 23, 17, 16);
 
 struct menu_item {
   const char* text;
   float value;
   float increment;
+  float minimum;
+  float maximum;
+};
+
+enum menu_entry_indices {
+  TARGET_WINDS = 0,
+  CURRENT_WINDS,
+  WIND_DIRECTION,
+  SPEED,
+  ACCELERATION,
+  WINDS_PER_SWEEP,
+  RIGHT_LIMIT,
+  LEFT_LIMIT,
+  NUMBER_OF_MENU_ENTRIES
 };
 
 int current_menu_entry_index = 0;
 bool menu_needs_redraw = false;
-const byte number_of_menu_entries = 7;
-menu_item menu[number_of_menu_entries] = {
-  { "Target Winds     ",    1000,  50   },
-  { "Current Winds    ",       0,   0   },
-  { "Speed W/s        ",       2,   0.1 },
-  { "Accel. W/s^2     ",     1.0,   0.1 },
-  { "Winds/Sweep      ",      10,   1   },
-  { "Right limit deg. ",       0,   1   },
-  { "Left Limit deg.  ",     180,   1   }
+
+menu_item menu[NUMBER_OF_MENU_ENTRIES] = {
+  { "Target Winds     ",    1000,  50,     1, 20000 },
+  { "Current Winds    ",       0,   0,     0, 20000 },
+  { "Wind Direction   ",       1,   2,    -1,     1 },
+  { "Speed W/s        ",       2,   0.1, 0.1,    10 },
+  { "Accel. W/s^2     ",     1.0,   0.1, 0.1,    10 },
+  { "Winds/Sweep      ",     100,   1,     0,  1000 },
+  { "Right limit deg. ",      90,   1,     0,   180 },
+  { "Left Limit deg.  ",     120,   1,     0,   180 }
 };
 
 bool menu_data_entry_active = false;
-
-volatile bool start_active = false;
-
-long start_time_usec = 0;
 
 EncoderButton encoder(ENCODER_BUTTON1, ENCODER_BUTTON2);
 
@@ -81,7 +106,7 @@ void draw_menu() {
     byte y_position = 7;
     const byte y_spacing = 8;
     u8g.setFont(u8g2_font_5x7_mr);
-    for (byte menu_entry_index = 0; menu_entry_index < number_of_menu_entries; ++menu_entry_index) {  
+    for (byte menu_entry_index = 0; menu_entry_index < NUMBER_OF_MENU_ENTRIES; ++menu_entry_index) {  
       u8g.setDrawColor(2);
       if (menu_entry_index == current_menu_entry_index && !menu_data_entry_active) {
         u8g.setDrawColor(0);    
@@ -103,11 +128,11 @@ void draw_menu() {
 
 // #################### EEPROM
 
-const float magic_cookie = 31.337f;
+const float magic_cookie = 331.337f;
 
 void read_eeprom() {
   Serial.println("Restoring from EEPROM...");
-  for (unsigned index = 0; index < number_of_menu_entries; ++index) {
+  for (unsigned index = 0; index < NUMBER_OF_MENU_ENTRIES; ++index) {
     // skip current winds
     if (index == 1) continue;
     EEPROM.get((index+1)*sizeof(float), menu[index].value);
@@ -119,7 +144,7 @@ void save_eeprom() {
   Serial.println("Saving to EEPROM");
   EEPROM.put(0, magic_cookie);
   float eeprom_value;
-  for (unsigned index = 0; index < number_of_menu_entries; ++index) {
+  for (unsigned index = 0; index < NUMBER_OF_MENU_ENTRIES; ++index) {
     // skip current winds
     if (index == 1) continue; 
     EEPROM.get((index+1)*sizeof(float), eeprom_value);
@@ -138,6 +163,10 @@ void setup() {
   Serial.begin(115200);
   while (!Serial) {}
 
+  Serial.println("Open Winder Firmware v0.1 starting up...");
+
+  Serial.println("Setting up EEPROM...");
+  
   float eeprom_value;
   if (EEPROM.get(0, eeprom_value) == magic_cookie) {
     read_eeprom();
@@ -145,22 +174,8 @@ void setup() {
     save_eeprom(); 
   }
 
-  stop_button.begin(STOP_BUTTON);
-  stop_button.setClickHandler(button_handler);
-  stop_button.setDoubleClickHandler(button_handler);
-  encoder_push_button.begin(ENCODER_PUSH_BUTTON);
-  encoder_push_button.setClickHandler(button_handler);
+  Serial.println("Setting up pins...");
   
-  u8g.begin();
-  draw_menu();
-
-  // Servo
-  servo.attach(SERVO_PIN);
-  servo.write(menu[5].value);
-  // pinMode(SERVO_PIN, OUTPUT);
-  // analogWrite(SERVO_PIN, 128);
-
-  // Beeper
   pinMode(37, OUTPUT);
 
   // Encoder buttons
@@ -176,6 +191,32 @@ void setup() {
 
   digitalWrite(MOTOR_Z_ENABLE, HIGH);
   digitalWrite(MOTOR_Z_DIRECTION, HIGH);
+
+  Serial.println("Setting up buttons...");
+  
+  stop_button.begin(STOP_BUTTON);
+  stop_button.setClickHandler(button_handler);
+  stop_button.setDoubleClickHandler(button_handler);
+  encoder_push_button.begin(ENCODER_PUSH_BUTTON);
+  encoder_push_button.setClickHandler(button_handler);
+
+
+  Serial.println("Drawing menu...");
+  
+  u8g.begin();
+  draw_menu();
+
+  Serial.println("Setting up servo...");
+  
+  // Servo
+  servo.attach(SERVO_PIN);
+  servo.write(menu[LEFT_LIMIT].value);
+  // pinMode(SERVO_PIN, OUTPUT);
+  // analogWrite(SERVO_PIN, 128);
+
+  // Beeper
+
+  Serial.println("Setting up timers...");
   /*
   Timer1.initialize();
   Timer1.attachInterrupt(process, timer_period_usec);
@@ -185,35 +226,24 @@ void setup() {
   FrequencyTimer2::setPeriod(timer_period_usec);
   FrequencyTimer2::setOnOverflow(process);
   */
+  cli();
   //set timer2 interrupt at 8kHz
   TCCR2A = 0;// set entire TCCR2A register to 0
   TCCR2B = 0;// same for TCCR2B
   TCNT2  = 0;//initialize counter value to 0
   // set compare match register for 8khz increments
   // OCR2A = 249;// = (16*10^6) / (8000*8) - 1 (must be <256)
-  OCR2A = 19;
+  OCR2A = 39;
   // turn on CTC mode
   TCCR2A |= (1 << WGM21);
   // Set CS21 bit for 8 prescaler
   TCCR2B |= (1 << CS21);   
   // enable timer compare interrupt
   TIMSK2 |= (1 << OCIE2A);
+  sei();
+  
+  Serial.println("Startup done.");
 }
-
-
-// #################### GLOBAL STATE
-
-unsigned long step_period_usec = 0;
-unsigned long steps_per_second;
-unsigned long elapsed_usec = 0;
-
-long steps_per_second_limit = 1L;
-
-volatile long max_steps = 1L;
-
-volatile long steps_taken = 0L;
-
-long elapsed_since_step_usec = 0L;
 
 
 // #################### INTERRUPTS
@@ -251,8 +281,8 @@ void button_handler(Button2 &button) {
       if (button.getClickType() == SINGLE_CLICK) {
         save_eeprom();
         start_time_usec = now_usec;
-        steps_per_second_limit = menu[2].value * steps_per_turn * microsteps;
-        max_steps = menu[0].value * steps_per_turn * microsteps;
+        steps_per_second_limit = menu[SPEED].value * steps_per_turn * microsteps;
+        max_steps = menu[TARGET_WINDS].value * steps_per_turn * microsteps;
         step_period_usec = 1e6L;
         elapsed_since_step_usec = 0;
 
@@ -267,13 +297,13 @@ void button_handler(Button2 &button) {
         start_active = !start_active;
 
         if (!start_active) {
-          menu[1].value = (float)steps_taken / (steps_per_turn * microsteps);
+          menu[CURRENT_WINDS].value = (float)steps_taken / (steps_per_turn * microsteps);
           draw_menu();
         }
       }
 
       if (button.getClickType() == DOUBLE_CLICK) {
-        menu[1].value = 0;
+        menu[CURRENT_WINDS].value = 0;
         steps_taken = 0;
         draw_menu();
       }
@@ -294,10 +324,13 @@ void loop() {
   stop_button.loop();
   encoder_push_button.loop();
 
+  
+  // STEPPER CONTROL
+  
   if (start_active) {
     const float seconds_since_start = (now_usec - start_time_usec) / 1e6f;
-    float winds_per_second = menu[3].value * seconds_since_start;
-    if (winds_per_second > menu[2].value) winds_per_second = menu[2].value;
+    float winds_per_second = menu[ACCELERATION].value * seconds_since_start;
+    if (winds_per_second > menu[SPEED].value) winds_per_second = menu[SPEED].value;
     
     // steps_per_second = microsteps * (10L + ((now_usec - start_time_usec) / 10000L));
     steps_per_second = 10L + winds_per_second * microsteps * steps_per_turn;
@@ -309,26 +342,35 @@ void loop() {
     step_period_usec = 1e6L / steps_per_second;
 
     const float current_wind = (float)steps_taken / (float)(steps_per_turn * microsteps);
-    const float sweep_phase = fmodf(current_wind / menu[4].value, 1.0);
+    const float sweep_phase = fmodf(current_wind / menu[WINDS_PER_SWEEP].value, 1.0);
     // Serial.println(sweep_phase);
     if (sweep_phase < 0.5f) {
       const float half_phase = 2.0f * sweep_phase;
-      servo.write((menu[6].value - menu[5].value) * half_phase + menu[5].value);
+      servo.write((menu[LEFT_LIMIT].value - menu[RIGHT_LIMIT].value) * half_phase + menu[RIGHT_LIMIT].value);
     } else {
       const float half_phase = 2.0f * (sweep_phase - 0.5f);
-      servo.write((menu[5].value - menu[6].value) * half_phase + menu[6].value);
+      servo.write((menu[RIGHT_LIMIT].value - menu[LEFT_LIMIT].value) * half_phase + menu[LEFT_LIMIT].value);
     }
   }
+
+  
+  // MENU
   
   const int encoder_position = encoder.position();
   if (encoder_position != last_encoder_position) {
     if (menu_data_entry_active) {
       int delta = encoder_position - last_encoder_position;
       menu[current_menu_entry_index].value += menu[current_menu_entry_index].increment * delta;
+      if (menu[current_menu_entry_index].value > menu[current_menu_entry_index].maximum) menu[current_menu_entry_index].value = menu[current_menu_entry_index].maximum;
+      if (menu[current_menu_entry_index].value < menu[current_menu_entry_index].minimum) menu[current_menu_entry_index].value = menu[current_menu_entry_index].minimum;
     } else {
       current_menu_entry_index += encoder_position - last_encoder_position;
+      if (current_menu_entry_index < 0) current_menu_entry_index += NUMBER_OF_MENU_ENTRIES;
+      current_menu_entry_index %= NUMBER_OF_MENU_ENTRIES;
+      /*
       if (current_menu_entry_index < 0) current_menu_entry_index = 0;
-      if (current_menu_entry_index > (number_of_menu_entries - 1)) current_menu_entry_index = (number_of_menu_entries - 1);
+      if (current_menu_entry_index > (NUMBER_OF_MENU_ENTRIES - 1)) current_menu_entry_index = (NUMBER_OF_MENU_ENTRIES - 1);
+      */
     }
     last_encoder_change_usec = now_usec;
     menu_needs_redraw = true;
@@ -340,7 +382,9 @@ void loop() {
     draw_menu();
     menu_needs_redraw = false;
   }
-    
+
+  // DEBUG OUTPUT
+  
   if (true && now_usec - last_output_usec > output_period_usec) {
     last_output_usec = now_usec;
 
