@@ -36,7 +36,7 @@ unsigned long steps_per_second_limit = 1L;
 volatile long max_steps = 1L;
 volatile long steps_taken = 0L;
 
-volatile bool start_active = false;
+// volatile bool start_active = false;
 long start_time_usec = 0;
 
 
@@ -50,12 +50,12 @@ Servo servo;
 Button2 encoder_push_button;
 Button2 stop_button;
 
-enum states {
+enum {
   STOPPED = 0,
   STARTING,
-  STARTED,
+  RUNNING,
   STOPPING
-};
+} state;
 
 
 // #################### MENU
@@ -133,8 +133,6 @@ const float magic_cookie = 331.337f;
 void read_eeprom() {
   Serial.println("Restoring from EEPROM...");
   for (unsigned index = 0; index < NUMBER_OF_MENU_ENTRIES; ++index) {
-    // skip current winds
-    if (index == 1) continue;
     EEPROM.get((index+1)*sizeof(float), menu[index].value);
   }
   Serial.println("Done.");
@@ -145,8 +143,6 @@ void save_eeprom() {
   EEPROM.put(0, magic_cookie);
   float eeprom_value;
   for (unsigned index = 0; index < NUMBER_OF_MENU_ENTRIES; ++index) {
-    // skip current winds
-    if (index == 1) continue; 
     EEPROM.get((index+1)*sizeof(float), eeprom_value);
     if (eeprom_value != menu[index].value) {
       Serial.println(menu[index].value);
@@ -190,7 +186,6 @@ void setup() {
   pinMode(MOTOR_Z_STEP, OUTPUT);
 
   digitalWrite(MOTOR_Z_ENABLE, HIGH);
-  digitalWrite(MOTOR_Z_DIRECTION, HIGH);
 
   Serial.println("Setting up buttons...");
   
@@ -251,17 +246,20 @@ void setup() {
 // void process() {
 ISR(TIMER2_COMPA_vect) {
   cli();
-  if (start_active && elapsed_since_step_usec > step_period_usec) {
-    if (steps_taken < max_steps) {    
-      elapsed_since_step_usec -= step_period_usec;
-  
-      PORTF |= B00000001;
-      PORTF &= B11111110;
+  if (start_active) {
+    if (steps_taken < max_steps) {
+      if (elapsed_since_step_usec > step_period_usec) {
+        elapsed_since_step_usec -= step_period_usec;
     
-      ++steps_taken;
+        PORTF |= B00000001;
+        PORTF &= B11111110;
+      
+        ++steps_taken;
+      }
+    } else {
+      start_active = false;
     }
   }
-
   elapsed_since_step_usec += timer_period_usec;
   sei();
 }
@@ -269,7 +267,7 @@ ISR(TIMER2_COMPA_vect) {
 // #################### BUTTON HANDLING
 
 unsigned long last_output_usec = 0;
-const unsigned long output_period_usec = 5e5L;
+const unsigned long output_period_usec = 1e6L;
 
 int last_encoder_position = 0;
 unsigned long last_encoder_change_usec = 0;
@@ -290,6 +288,7 @@ void button_handler(Button2 &button) {
         
         if (!start_active) {
           digitalWrite(MOTOR_Z_ENABLE, LOW);
+          if (menu[WIND_DIRECTION].value > 0) digitalWrite(MOTOR_Z_DIRECTION, HIGH); else digitalWrite(MOTOR_Z_DIRECTION, LOW);
         } else {
           digitalWrite(MOTOR_Z_ENABLE, HIGH);
         }
@@ -327,7 +326,7 @@ void loop() {
   
   // STEPPER CONTROL
   
-  if (start_active) {
+  if (state == RUNNING) {
     const float seconds_since_start = (now_usec - start_time_usec) / 1e6f;
     float winds_per_second = menu[ACCELERATION].value * seconds_since_start;
     if (winds_per_second > menu[SPEED].value) winds_per_second = menu[SPEED].value;
