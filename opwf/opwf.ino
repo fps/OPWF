@@ -2,7 +2,7 @@
 #include <EncoderButton.h>
 
 #include <Button2.h>
-#include <Servo.h>
+#include <Servo_Hardware_PWM.h>
 #include <EEPROM.h>
 #include <U8g2lib.h>
 
@@ -18,7 +18,7 @@
 #define MOTOR_Z_DIRECTION 55
 #define MOTOR_Z_STEP 54
 
-#define SERVO_PIN 11
+#define SERVO_PIN 5
 
 const long timer_period_usec = 20L;
 const long steps_per_turn = 200L;
