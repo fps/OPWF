@@ -231,7 +231,7 @@ void setup() {
   TCNT2  = 0;//initialize counter value to 0
   // set compare match register for 8khz increments
   // OCR2A = 249;// = (16*10^6) / (8000*8) - 1 (must be <256)
-  OCR2A = 39;
+  OCR2A = 2 * timer_period_usec - 1;
   // turn on CTC mode
   TCCR2A |= (1 << WGM21);
   // Set CS21 bit for 8 prescaler
@@ -398,7 +398,7 @@ void loop() {
     last_encoder_position = encoder_position;
   }
   
-  if (menu_needs_redraw && now_usec - last_encoder_change_usec > 5e5L)
+  if (menu_needs_redraw && now_usec - last_encoder_change_usec > 2e5L)
   {
     draw_menu();
     menu_needs_redraw = false;
