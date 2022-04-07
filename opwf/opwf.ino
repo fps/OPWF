@@ -18,9 +18,11 @@
 #define MOTOR_Z_DIRECTION 55
 #define MOTOR_Z_STEP 54
 
-#define SERVO_PIN 5
+#define SERVO_PIN 6
 
-const long timer_period_usec = 20L;
+const long stepper_timer_period_usec = 20L;
+const long servo_timer_period_usec = 1e3L;
+
 const long steps_per_turn = 200L;
 const long microsteps = 16L;
 
@@ -231,13 +233,27 @@ void setup() {
   TCNT2  = 0;//initialize counter value to 0
   // set compare match register for 8khz increments
   // OCR2A = 249;// = (16*10^6) / (8000*8) - 1 (must be <256)
-  OCR2A = 2 * timer_period_usec - 1;
+  OCR2A = 2 * stepper_timer_period_usec - 1;
   // turn on CTC mode
   TCCR2A |= (1 << WGM21);
   // Set CS21 bit for 8 prescaler
   TCCR2B |= (1 << CS21);   
   // enable timer compare interrupt
   TIMSK2 |= (1 << OCIE2A);
+
+  TCCR3A = 0;// set entire TCCR2A register to 0
+  TCCR3B = 0;// same for TCCR2B
+  TCNT3  = 0;//initialize counter value to 0
+  // set compare match register for 8khz increments
+  // OCR2A = 249;// = (16*10^6) / (8000*8) - 1 (must be <256)
+  OCR3A = 2 * servo_timer_period_usec - 1;
+  // turn on CTC mode
+  TCCR3A |= (1 << WGM31);
+  // Set CS21 bit for 8 prescaler
+  TCCR3B |= (1 << CS31);   
+  TCCR3B |= (1 << CS30);   
+  // enable timer compare interrupt
+  TIMSK3 |= (1 << OCIE3A);
   sei();
   
   Serial.println("Startup done.");
@@ -263,10 +279,32 @@ ISR(TIMER2_COMPA_vect) {
       state = STOPPING;
     }
   }
-  elapsed_since_step_usec += timer_period_usec;
+  elapsed_since_step_usec += stepper_timer_period_usec;
   sei();
 }
 
+volatile long servo_timer_interrupts = 0;
+
+ISR(TIMER3_COMPA_vect) {
+  cli();
+  if (state != STOPPED) {
+    step_period_usec = 1e6L / steps_per_second;
+
+    const float current_wind = (float)steps_taken / (float)(steps_per_turn * microsteps);
+    const float sweep_phase = fmodf(current_wind / menu[WINDS_PER_SWEEP].value, 1.0);
+    // Serial.println(sweep_phase);
+    if (sweep_phase < 0.5f) {
+      const float half_phase = 2.0f * sweep_phase;
+      servo.write((menu[LEFT_LIMIT].value - menu[RIGHT_LIMIT].value) * half_phase + menu[RIGHT_LIMIT].value);
+    } else {
+      const float half_phase = 2.0f * (sweep_phase - 0.5f);
+      servo.write((menu[RIGHT_LIMIT].value - menu[LEFT_LIMIT].value) * half_phase + menu[LEFT_LIMIT].value);
+    }
+    
+  }
+  ++servo_timer_interrupts;
+  sei();
+}
 // #################### BUTTON HANDLING
 
 unsigned long last_output_usec = 0;
@@ -361,6 +399,11 @@ void loop() {
 
   if (state != STOPPED) {
     step_period_usec = 1e6L / steps_per_second;
+  }
+  
+  /*
+  if (state != STOPPED) {
+    step_period_usec = 1e6L / steps_per_second;
 
     const float current_wind = (float)steps_taken / (float)(steps_per_turn * microsteps);
     const float sweep_phase = fmodf(current_wind / menu[WINDS_PER_SWEEP].value, 1.0);
@@ -373,8 +416,7 @@ void loop() {
       servo.write((menu[RIGHT_LIMIT].value - menu[LEFT_LIMIT].value) * half_phase + menu[LEFT_LIMIT].value);
     }
   }
-
-  
+  */
   // MENU
   
   const int encoder_position = encoder.position();
@@ -423,7 +465,11 @@ void loop() {
     Serial.print(steps_per_second);
     Serial.print(" step period: ");
     Serial.print(step_period_usec);
+    Serial.print(" servo irqs: ");
+    Serial.print(servo_timer_interrupts);
     Serial.println("");
+    
+    menu_needs_redraw = true;;
   }  
 
   return;
