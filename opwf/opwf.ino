@@ -21,7 +21,7 @@
 #define SERVO_PIN 6
 
 const long stepper_timer_period_usec = 20L;
-const long servo_timer_period_usec = 1e3L;
+const long servo_timer_period_usec = 10e3L;
 
 const long steps_per_turn = 200L;
 const long microsteps = 16L;
@@ -246,9 +246,11 @@ void setup() {
   TCNT3  = 0;//initialize counter value to 0
   // set compare match register for 8khz increments
   // OCR2A = 249;// = (16*10^6) / (8000*8) - 1 (must be <256)
-  OCR3A = 2 * servo_timer_period_usec - 1;
+  OCR3A = (servo_timer_period_usec / 4) - 1;
+  // OCR3A = 10;
   // turn on CTC mode
-  TCCR3A |= (1 << WGM31);
+  // TCCR3A |= (1 << WGM31);
+  TCCR3B |= (1 << WGM32);
   // Set CS21 bit for 8 prescaler
   TCCR3B |= (1 << CS31);   
   TCCR3B |= (1 << CS30);   
@@ -400,23 +402,7 @@ void loop() {
   if (state != STOPPED) {
     step_period_usec = 1e6L / steps_per_second;
   }
-  
-  /*
-  if (state != STOPPED) {
-    step_period_usec = 1e6L / steps_per_second;
 
-    const float current_wind = (float)steps_taken / (float)(steps_per_turn * microsteps);
-    const float sweep_phase = fmodf(current_wind / menu[WINDS_PER_SWEEP].value, 1.0);
-    // Serial.println(sweep_phase);
-    if (sweep_phase < 0.5f) {
-      const float half_phase = 2.0f * sweep_phase;
-      servo.write((menu[LEFT_LIMIT].value - menu[RIGHT_LIMIT].value) * half_phase + menu[RIGHT_LIMIT].value);
-    } else {
-      const float half_phase = 2.0f * (sweep_phase - 0.5f);
-      servo.write((menu[RIGHT_LIMIT].value - menu[LEFT_LIMIT].value) * half_phase + menu[LEFT_LIMIT].value);
-    }
-  }
-  */
   // MENU
   
   const int encoder_position = encoder.position();
