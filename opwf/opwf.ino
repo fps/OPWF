@@ -161,7 +161,7 @@ void setup() {
   Serial.begin(115200);
   while (!Serial) {}
 
-  Serial.println("Open Winder Firmware v0.1 starting up...");
+  Serial.println("Open Pickup Winder Firmware v0.1 starting up...");
 
   Serial.println("Setting up EEPROM...");
   
@@ -217,15 +217,7 @@ void setup() {
   state = STOPPED;
   
   Serial.println("Setting up timers...");
-  /*
-  Timer1.initialize();
-  Timer1.attachInterrupt(process, timer_period_usec);
-  */
 
-  /* 
-  FrequencyTimer2::setPeriod(timer_period_usec);
-  FrequencyTimer2::setOnOverflow(process);
-  */
   cli();
   //set timer2 interrupt at 8kHz
   TCCR2A = 0;// set entire TCCR2A register to 0
@@ -310,7 +302,7 @@ ISR(TIMER3_COMPA_vect) {
 // #################### BUTTON HANDLING
 
 unsigned long last_output_usec = 0;
-const unsigned long output_period_usec = 1e6L;
+const unsigned long output_period_usec = 2e6L;
 
 int last_encoder_position = 0;
 unsigned long last_encoder_change_usec = 0;
@@ -455,7 +447,8 @@ void loop() {
     Serial.print(servo_timer_interrupts);
     Serial.println("");
     
-    menu_needs_redraw = true;;
+    menu[CURRENT_WINDS].value = (float)steps_taken / (float)(steps_per_turn * microsteps);
+    draw_menu();
   }  
 
   return;
