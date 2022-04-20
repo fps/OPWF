@@ -1,11 +1,13 @@
 # Introduction
 
-This repository contains firmware for a pickup winder based on a Ramps 1.4 board, RepRadDiscount Full Graphics Smart Controller, a 200 steps per revolution stepper motor, a servo and an Arduino Mega 2560 microcontroller board.
+This repository contains firmware for a pickup winder based on a Ramps 1.4 board, RepRapDiscount Full Graphics Smart Controller, a 200 steps per revolution stepper motor, a servo and an Arduino Mega 2560 microcontroller board.
 
 # Installation
 
 - Assemble the pickup winder as can be seen in the picture below
 - Use e.g. the Arduino IDE to flash the sketch in the src/ directory to the Mega 2560
+
+![Assembled winder](https://github.com/fps/OPWF/blob/master/IMG_20220405_183842.jpg)
 
 # Assembly
 
@@ -32,8 +34,7 @@ This repository contains firmware for a pickup winder based on a Ramps 1.4 board
 
 # CAVEATS
 
-- Do not use the encoder during the winding process. The stepper control should be robust, but the servo control is not. Everytime you move the encoder you will experience the servo jerking. This will take a little effort to do correcty.
-- The "Current Winds" counter is only updated when the winding is stopped. Otherwise the display updates would interfere with the servo controll as well.
+- The button handling is done purely in software without interrupts, so sometimes presses are missed.
 
 # LICENSE
 
