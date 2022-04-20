@@ -2,6 +2,8 @@
 
 This repository contains firmware for a pickup winder based on a Ramps 1.4 board, RepRapDiscount Full Graphics Smart Controller, a 200 steps per revolution stepper motor, a servo and an Arduino Mega 2560 microcontroller board.
 
+![Video showing the winder in action](https://www.youtube.com/shorts/mcej-a_-2Q8)
+
 # Installation
 
 - Assemble the pickup winder as can be seen in the picture below
