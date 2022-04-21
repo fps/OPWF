@@ -18,6 +18,7 @@ This repository contains firmware for a pickup winder based on a Ramps 1.4 board
 - Mount the arduino Mega 2560 in the back left corner using ca. two wood screws
 - Mount the Ramps 1.4 board on top of the Arduino
 - Attach at least the Z-direction stepper driver and set it to 4 microsteps using the jumpers before inserting the driver board.
+- Set the jumper on the Ramps board to supply 5V power to the servo (That jumper is left of the reset button on the board)
 - Attach the servo to the second servo pin from the left (it's the one corresponding to the digital pin D6 - this is important for the PWM and interrupt management)
 - Secure the servo cable a little bit with a piece of tape so that it won't entangle with the pickup wire
 - Attach the servo on a piece of wood to raise it up a little from the base board. Position it in such a way that the center of the servo axis aligns with the center of a pickup bobbin when attached to the motor
