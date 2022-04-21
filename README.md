@@ -28,11 +28,24 @@ This repository contains firmware for a pickup winder based on a Ramps 1.4 board
 
 # Usage
 
+## General
+
 - Press the encoder button on the display to enter/leave a setting
 - Rotate the encoder to change a setting. Since the display is so godawfully slow the code waits for a timeout until updating the display.
 - Press the STOP button on the display to start the winding process
 - Press the STOP button to stop the winding process, too ;)
 - Press the STOP button twice (doubleclick) to reset the "Current Winds" counter to 0
+
+## Menu entries
+
+- Target winds: The number of winds that the winder will stop winding at. Note that you can change this at any point. So to wind for e.g. 1000 winds and then another 1000 winds first set the target winds to 1000, start the winding, and after it stopped set the target to 2000 and start the winding again.
+- Current winds: The current number of winds performed since the counter was last reset
+- Wind direction: Can be either 1 or -1 corresponding to either clockwise/anticlockwise or anticlockwise/clockwise directions depending on how you wired the stepper motor
+- Speed W/s: The speed in winds per second
+- Acceleration W/s^2: The acceleration used to ramp up to the selected speed
+- Winds/Sweep: The number of winds performed for a full servo sweep. So if you select 100 here, the servo will be swept from Right limit to Left limit during the first 50 winds and from Left limit to Right limit during the second 50 sweeps. Then the dance starts all over.
+- Right limit deg.: The first servo limit 
+- Left limit deg. The second servo limit
 
 # CAVEATS
 
